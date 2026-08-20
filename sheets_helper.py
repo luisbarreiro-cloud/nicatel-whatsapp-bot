@@ -1,126 +1,127 @@
 """
 sheets_helper.py
 -----------------
-Se encarga de traer los datos de ventas desde Google Sheets y aplicar
+Se encarga de traer los datos de facturación desde Google Sheets y aplicar
 filtros/agrupaciones. Usa el link de exportación a CSV de la planilla,
 así que NO necesitás credenciales de Google Cloud ni service accounts.
 
-Requisito en tu Google Sheet:
-- Columnas esperadas (podés tener más, estas son las que usa el bot):
-    Fecha        -> formato YYYY-MM-DD o DD/MM/YYYY
-    Producto     -> texto libre (ej: "TV Samsung 55 QLED")
-    Categoria    -> texto libre (ej: "TV", "Celular", "Electrodomestico")
-    Cantidad     -> número entero
-    PrecioUnitario -> número (opcional, para calcular facturación)
-    Canal        -> texto libre (ej: "Tienda", "MercadoLibre", "Interior")
+Columnas reales de la planilla de Nicatel (hoja "Facturación"):
+    SKU, Nombre, Qty, USD, Total, Mes, Trimestre, Categoría,
+    Subcategoria 1, Subcategoria 2, Familia, Marca,
+    Unidad de Negocio, Punto de venta
 
-- La planilla tiene que estar compartida como
-  "Cualquier persona con el enlace puede ver" (Ver > no hace falta editar).
+Nota importante: la planilla no tiene columna de Año. Todo lo cargado
+hasta ahora es de 2026.
 """
 
 import os
 import pandas as pd
-from datetime import datetime
 
-# ID de tu Google Sheet (lo sacás de la URL:
-# https://docs.google.com/spreadsheets/d/ESTE_ES_EL_ID/edit)
+COL_SKU = "SKU"
+COL_NOMBRE = "Nombre"
+COL_QTY = "Qty"
+COL_USD = "USD"
+COL_TOTAL = "Total"
+COL_MES = "Mes"
+COL_TRIMESTRE = "Trimestre"
+COL_CATEGORIA = "Categoría"
+COL_FAMILIA = "Familia"
+COL_MARCA = "Marca"
+COL_UNIDAD_NEGOCIO = "Unidad de Negocio"
+COL_PUNTO_VENTA = "Punto de venta"
+
 SHEET_ID = os.environ.get("GOOGLE_SHEET_ID", "")
-
-# GID de la pestaña específica (0 = primera pestaña). Lo sacás de la URL
-# cuando estás parado en esa pestaña: .../edit#gid=ESTE_NUMERO
 SHEET_GID = os.environ.get("GOOGLE_SHEET_GID", "0")
 
 
 def _build_csv_url() -> str:
     if not SHEET_ID:
-        raise ValueError(
-            "Falta configurar GOOGLE_SHEET_ID en las variables de entorno."
-        )
-    return (
-        f"https://docs.google.com/spreadsheets/d/{SHEET_ID}"
-        f"/export?format=csv&gid={SHEET_GID}"
-    )
+        raise ValueError("Falta configurar GOOGLE_SHEET_ID en las variables de entorno.")
+    return f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={SHEET_GID}"
+
+
+def _parse_numero_uy(valor) -> float:
+    if pd.isna(valor):
+        return float("nan")
+    if isinstance(valor, (int, float)):
+        return float(valor)
+    texto = str(valor).strip()
+    if texto == "":
+        return float("nan")
+    texto = texto.replace(".", "").replace(",", ".")
+    try:
+        return float(texto)
+    except ValueError:
+        return float("nan")
 
 
 def cargar_datos() -> pd.DataFrame:
-    """Descarga la planilla completa como DataFrame, cacheada por request."""
     url = _build_csv_url()
-    df = pd.read_csv(url)
-
-    # Normalizar nombres de columnas (sin tildes/espacios raros)
+    df = pd.read_csv(url, dtype=str)
     df.columns = [c.strip() for c in df.columns]
-
-    # Parsear fecha de forma flexible
-    if "Fecha" in df.columns:
-        df["Fecha"] = pd.to_datetime(df["Fecha"], dayfirst=True, errors="coerce")
-
-    # Asegurar tipos numéricos
-    for col in ["Cantidad", "PrecioUnitario"]:
+    for col in [COL_QTY, COL_USD, COL_TOTAL]:
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    if "Cantidad" in df.columns and "PrecioUnitario" in df.columns:
-        df["Total"] = df["Cantidad"] * df["PrecioUnitario"]
-
+            df[col] = df[col].apply(_parse_numero_uy)
     return df
 
 
 def consultar_ventas(
-    fecha_inicio: str | None = None,
-    fecha_fin: str | None = None,
+    mes: str | None = None,
+    trimestre: str | None = None,
     producto: str | None = None,
     categoria: str | None = None,
-    canal: str | None = None,
+    familia: str | None = None,
+    marca: str | None = None,
+    punto_venta: str | None = None,
     agrupar_por: str | None = None,
 ) -> dict:
-    """
-    Filtra el DataFrame de ventas según los parámetros dados y devuelve
-    un resumen. Todos los parámetros son opcionales.
-
-    agrupar_por: "producto" | "categoria" | "canal" | "mes" | None
-    """
     df = cargar_datos()
 
-    if fecha_inicio and "Fecha" in df.columns:
-        df = df[df["Fecha"] >= pd.to_datetime(fecha_inicio)]
-    if fecha_fin and "Fecha" in df.columns:
-        df = df[df["Fecha"] <= pd.to_datetime(fecha_fin)]
-    if producto and "Producto" in df.columns:
-        df = df[df["Producto"].str.contains(producto, case=False, na=False)]
-    if categoria and "Categoria" in df.columns:
-        df = df[df["Categoria"].str.contains(categoria, case=False, na=False)]
-    if canal and "Canal" in df.columns:
-        df = df[df["Canal"].str.contains(canal, case=False, na=False)]
+    if mes and COL_MES in df.columns:
+        df = df[df[COL_MES].str.contains(mes, case=False, na=False)]
+    if trimestre and COL_TRIMESTRE in df.columns:
+        df = df[df[COL_TRIMESTRE].str.contains(trimestre, case=False, na=False)]
+    if producto:
+        mask = pd.Series(False, index=df.index)
+        if COL_NOMBRE in df.columns:
+            mask |= df[COL_NOMBRE].str.contains(producto, case=False, na=False)
+        if COL_SKU in df.columns:
+            mask |= df[COL_SKU].astype(str).str.contains(producto, case=False, na=False)
+        df = df[mask]
+    if categoria and COL_CATEGORIA in df.columns:
+        df = df[df[COL_CATEGORIA].str.contains(categoria, case=False, na=False)]
+    if familia and COL_FAMILIA in df.columns:
+        df = df[df[COL_FAMILIA].str.contains(familia, case=False, na=False)]
+    if marca and COL_MARCA in df.columns:
+        df = df[df[COL_MARCA].str.contains(marca, case=False, na=False)]
+    if punto_venta and COL_PUNTO_VENTA in df.columns:
+        df = df[df[COL_PUNTO_VENTA].str.contains(punto_venta, case=False, na=False)]
 
     resultado = {
         "filas_encontradas": int(len(df)),
-        "unidades_totales": int(df["Cantidad"].sum()) if "Cantidad" in df.columns else None,
-        "facturacion_total": float(df["Total"].sum()) if "Total" in df.columns else None,
+        "unidades_totales": int(df[COL_QTY].sum()) if COL_QTY in df.columns else None,
+        "facturacion_total_usd": round(float(df[COL_TOTAL].sum()), 2) if COL_TOTAL in df.columns else None,
+    }
+
+    col_map = {
+        "categoria": COL_CATEGORIA,
+        "familia": COL_FAMILIA,
+        "marca": COL_MARCA,
+        "punto_venta": COL_PUNTO_VENTA,
+        "mes": COL_MES,
     }
 
     if agrupar_por and len(df) > 0:
-        col_map = {
-            "producto": "Producto",
-            "categoria": "Categoria",
-            "canal": "Canal",
-        }
-        if agrupar_por == "mes" and "Fecha" in df.columns:
-            df["Mes"] = df["Fecha"].dt.to_period("M").astype(str)
-            group_col = "Mes"
-        else:
-            group_col = col_map.get(agrupar_por)
-
+        group_col = col_map.get(agrupar_por)
         if group_col and group_col in df.columns:
             agg_dict = {}
-            if "Cantidad" in df.columns:
-                agg_dict["Cantidad"] = "sum"
-            if "Total" in df.columns:
-                agg_dict["Total"] = "sum"
+            if COL_QTY in df.columns:
+                agg_dict[COL_QTY] = "sum"
+            if COL_TOTAL in df.columns:
+                agg_dict[COL_TOTAL] = "sum"
             agrupado = df.groupby(group_col).agg(agg_dict).reset_index()
-            agrupado = agrupado.sort_values(
-                by="Cantidad" if "Cantidad" in agrupado.columns else group_col,
-                ascending=False,
-            )
+            sort_col = COL_QTY if COL_QTY in agrupado.columns else group_col
+            agrupado = agrupado.sort_values(by=sort_col, ascending=False)
             resultado["desglose"] = agrupado.to_dict(orient="records")
 
     return resultado
