@@ -16,8 +16,8 @@ hasta ahora es de 2026.
 
 import os
 import pandas as pd
-   import requests
-   import io
+import requests
+import io
 
 COL_SKU = "SKU"
 COL_NOMBRE = "Nombre"
