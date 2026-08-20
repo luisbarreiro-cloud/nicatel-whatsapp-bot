@@ -9,10 +9,13 @@ WhatsApp.
 """
 
 import os
+import logging
 from datetime import datetime
 import anthropic
 
 from sheets_helper import consultar_ventas
+
+logger = logging.getLogger("whatsapp-sales-bot")
 
 client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
@@ -22,37 +25,56 @@ TOOLS = [
     {
         "name": "consultar_ventas",
         "description": (
-            "Consulta los datos de ventas de Nicatel filtrados por fecha, "
-            "producto, categoría o canal, y devuelve totales de unidades "
-            "y facturación. Podés agrupar el resultado por producto, "
-            "categoria, canal o mes."
+            "Consulta los datos de facturación de Nicatel (Samsung y Nstore) "
+            "filtrados por mes, trimestre, producto, categoría, familia, "
+            "marca o punto de venta, y devuelve totales de unidades y "
+            "facturación en USD. Podés agrupar el resultado por categoría, "
+            "familia, marca, punto de venta o mes."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "fecha_inicio": {
+                "mes": {
                     "type": "string",
-                    "description": "Fecha desde, formato YYYY-MM-DD. Opcional.",
+                    "description": (
+                        "Nombre del mes en español (Enero, Febrero, Marzo, "
+                        "Abril, Mayo, Junio, Julio...). Todos los datos "
+                        "cargados hasta ahora son de 2026. Opcional."
+                    ),
                 },
-                "fecha_fin": {
+                "trimestre": {
                     "type": "string",
-                    "description": "Fecha hasta, formato YYYY-MM-DD. Opcional.",
+                    "description": "Q1 o Q2 (trimestres cargados hasta ahora). Opcional.",
                 },
                 "producto": {
                     "type": "string",
-                    "description": "Nombre o parte del nombre del producto. Opcional.",
+                    "description": "Nombre o parte del nombre del producto, o SKU. Opcional.",
                 },
                 "categoria": {
                     "type": "string",
-                    "description": "Categoría de producto (ej: TV, Celular). Opcional.",
+                    "description": (
+                        "Categoría de producto, ej: TV, Celulares, CONSUMER, "
+                        "AIRE, AUDIO, Monitor, Tablet, Wearables, etc. Opcional."
+                    ),
                 },
-                "canal": {
+                "familia": {
                     "type": "string",
-                    "description": "Canal de venta (ej: Tienda, MercadoLibre, Interior). Opcional.",
+                    "description": "Familia de producto, ej: Neo Qled, Qled, Side by Side, Galaxy A, Buds. Opcional.",
+                },
+                "marca": {
+                    "type": "string",
+                    "description": "Marca, ej: Samsung, Xiaomi, JBL, Iphone. Opcional.",
+                },
+                "punto_venta": {
+                    "type": "string",
+                    "description": (
+                        "Punto de venta: SBS, PDE, WEB, Nuevocentro, Tres cruces, "
+                        "Car one. Opcional."
+                    ),
                 },
                 "agrupar_por": {
                     "type": "string",
-                    "enum": ["producto", "categoria", "canal", "mes"],
+                    "enum": ["categoria", "familia", "marca", "punto_venta", "mes"],
                     "description": "Cómo desglosar el resultado. Opcional.",
                 },
             },
@@ -61,19 +83,26 @@ TOOLS = [
 ]
 
 SYSTEM_PROMPT = f"""Sos el asistente comercial de Nicatel S.A., una distribuidora
-uruguaya de electrónica de consumo. Respondés por WhatsApp a Luisao, el
-Gerente Comercial, que te va a hacer preguntas en español rioplatense sobre
-las ventas de la empresa (unidades vendidas, facturación, por producto,
-categoría, canal o período).
+uruguaya de electrónica de consumo (Samsung y Nstore). Respondés por
+WhatsApp a Luisao, el Gerente Comercial, que te va a hacer preguntas en
+español rioplatense sobre la facturación de la empresa (unidades vendidas,
+facturación en USD, por producto, categoría, familia, marca, punto de
+venta o período).
 
 Hoy es {datetime.now().strftime('%Y-%m-%d')}.
 
-Usá la herramienta consultar_ventas para traer los datos reales antes de
-responder cualquier pregunta sobre números de ventas. Nunca inventes cifras.
+IMPORTANTE sobre los datos disponibles: la planilla actual tiene datos
+mensuales cargados de Enero a Junio de 2026 (Q1 y Q2), y NO tiene columna
+de año — asumí siempre 2026 salvo que Luisao diga explícitamente otro año,
+en cuyo caso aclarale que esa planilla todavía no tiene datos de ese año.
 
-Cuando interpretes fechas relativas ("este mes", "el mes pasado", "en lo
-que va del año"), convertilas vos a fechas concretas antes de llamar a la
-herramienta.
+Usá la herramienta consultar_ventas para traer los datos reales antes de
+responder cualquier pregunta sobre números de facturación. Nunca inventes
+cifras.
+
+Cuando interpretes períodos relativos ("este mes", "el mes pasado", "en lo
+que va del año"), convertilos vos al nombre de mes o trimestre concreto
+antes de llamar a la herramienta (recordá que sólo hay datos hasta Junio).
 
 Al responder:
 - Sé breve y directo, como un mensaje de WhatsApp (no uses markdown ni
@@ -90,8 +119,7 @@ def responder_pregunta(pregunta_usuario: str) -> str:
 
     messages = [{"role": "user", "content": pregunta_usuario}]
 
-    # Loop hasta que Claude devuelva una respuesta final (sin tool_use)
-    for _ in range(5):  # límite de seguridad para evitar loops infinitos
+    for _ in range(5):
         response = client.messages.create(
             model=MODEL,
             max_tokens=1024,
@@ -101,13 +129,11 @@ def responder_pregunta(pregunta_usuario: str) -> str:
         )
 
         if response.stop_reason != "tool_use":
-            # Extraer el texto final
             texto = "".join(
                 block.text for block in response.content if block.type == "text"
             )
             return texto.strip() or "No pude generar una respuesta, probá reformular la pregunta."
 
-        # Hay uno o más tool_use: los ejecutamos y devolvemos los resultados
         messages.append({"role": "assistant", "content": response.content})
 
         tool_results = []
@@ -116,6 +142,7 @@ def responder_pregunta(pregunta_usuario: str) -> str:
                 try:
                     resultado = consultar_ventas(**block.input)
                 except Exception as e:
+                    logger.exception("Error en consultar_ventas")
                     resultado = {"error": str(e)}
 
                 tool_results.append(
