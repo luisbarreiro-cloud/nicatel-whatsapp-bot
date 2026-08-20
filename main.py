@@ -42,7 +42,7 @@ async def whatsapp_webhook(request: Request):
 
     if not pregunta:
         resp.message("No recibí ningún texto en tu mensaje, probá de nuevo.")
-        return Response(content=str(resp), media_type="application/xml")
+        return Response(content=str(resp), media_type="text/xml")
 
     try:
         respuesta = responder_pregunta(pregunta)
@@ -54,4 +54,4 @@ async def whatsapp_webhook(request: Request):
         )
 
     resp.message(respuesta)
-    return Response(content=str(resp), media_type="application/xml")
+    return Response(content=str(resp), media_type="text/xml")
