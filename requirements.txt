@@ -5,3 +5,4 @@ pandas==2.2.2
 twilio==9.3.2
 python-dotenv==1.0.1
 python-multipart==0.0.9
+httpx<0.28
