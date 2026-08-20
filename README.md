@@ -137,6 +137,7 @@ nada.
   distintos.
 - Pasar de Google Sheets a una base de datos real si el volumen de datos
   crece mucho.
+  
 - Agregar gráficos: que el bot te mande una imagen de un gráfico simple
   en vez de sólo texto.
 
