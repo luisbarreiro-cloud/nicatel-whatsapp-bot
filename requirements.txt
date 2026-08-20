@@ -1,0 +1,7 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+anthropic==0.39.0
+pandas==2.2.2
+twilio==9.3.2
+python-dotenv==1.0.1
+python-multipart==0.0.9
