@@ -15,9 +15,9 @@ hasta ahora es de 2026.
 """
 
 import os
+import io
 import pandas as pd
 import requests
-import io
 
 COL_SKU = "SKU"
 COL_NOMBRE = "Nombre"
@@ -57,13 +57,18 @@ def _parse_numero_uy(valor) -> float:
         return float("nan")
 
 
- def cargar_datos() -> pd.DataFrame:
-       """Descarga la planilla completa como DataFrame."""
-       url = _build_csv_url()
-       headers = {"User-Agent": "Mozilla/5.0"}
-       respuesta = requests.get(url, headers=headers, timeout=15)
-       respuesta.raise_for_status()
-       df = pd.read_csv(io.StringIO(respuesta.text), dtype=str)
+def cargar_datos() -> pd.DataFrame:
+    url = _build_csv_url()
+    headers = {"User-Agent": "Mozilla/5.0"}
+    respuesta = requests.get(url, headers=headers, timeout=15)
+    respuesta.raise_for_status()
+    df = pd.read_csv(io.StringIO(respuesta.text), dtype=str)
+    df.columns = [c.strip() for c in df.columns]
+    for col in [COL_QTY, COL_USD, COL_TOTAL]:
+        if col in df.columns:
+            df[col] = df[col].apply(_parse_numero_uy)
+    return df
+
 
 def consultar_ventas(
     mes: str | None = None,
