@@ -57,7 +57,7 @@ def _parse_numero_uy(valor) -> float:
         return float("nan")
 
 
-       def cargar_datos() -> pd.DataFrame:
+ def cargar_datos() -> pd.DataFrame:
        """Descarga la planilla completa como DataFrame."""
        url = _build_csv_url()
        headers = {"User-Agent": "Mozilla/5.0"}
