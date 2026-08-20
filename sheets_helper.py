@@ -62,6 +62,7 @@ def cargar_datos() -> pd.DataFrame:
     headers = {"User-Agent": "Mozilla/5.0"}
     respuesta = requests.get(url, headers=headers, timeout=15)
     respuesta.raise_for_status()
+    respuesta.encoding = "utf-8"
     df = pd.read_csv(io.StringIO(respuesta.text), dtype=str)
     df.columns = [c.strip() for c in df.columns]
     for col in [COL_QTY, COL_USD, COL_TOTAL]:
